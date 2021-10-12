@@ -130,9 +130,9 @@ pipeline {
     stage('Copy Image') {
     	steps {
     	  withDockerRegistry([credentialsId: "image-creds-non-prod", url: "http://docker-registry.default.svc.cluster.local:5000"]) {
-        	withDockerRegistry([credentialsId: "image-creds-prod", url: "https://default-route-openshift-image-registry.rhpds-107036-6c045c923eeb234d1b0c99c65fa6f1d1-0000.us-east.containers.appdomain.cloud"]) {
+        	withDockerRegistry([credentialsId: "image-creds-prod", url: "https://default-route-openshift-image-registry.apps.prod-cluster-url.com"]) {
             sh """
-                oc image mirror docker-registry.default.svc.cluster.local:5000/cicd/petclinic:dev default-route-openshift-image-registry.rhpds-107036-6c045c923eeb234d1b0c99c65fa6f1d1-0000.us-east.containers.appdomain.cloud/cicd/petclinic:dev --insecure=true
+                oc image mirror docker-registry.default.svc.cluster.local:5000/cicd/petclinic:dev default-route-openshift-image-registry.apps.prod-cluster-url.com/cicd/petclinic:prod --insecure=true
             """
           }
     	  }
@@ -159,3 +159,23 @@ pipeline {
   }
 }
 ```
+
+When it comes to mirroring the images, there are a few parts to understand:
+
+* **Local cluster image registry internal URL:** `docker-registry.default.svc.cluster.local:5000`
+* **Local image project/imagename:tag:** `/cicd/petclinic:dev`
+* **Production cluster image registry exposed route url:** `default-route-openshift-image-registry.apps.prod-cluster-url.com`
+* **Production image project/imagename:tag:** `/cicd/petclinic:prod`
+* **Use insecure (http) protocol for local registry:** `--insecure=true`
+
+Put together, the command looks like this (split across multiple lines for clarity):
+
+```
+oc image mirror \
+    docker-registry.default.svc.cluster.local:5000/cicd/petclinic:dev \
+    default-route-openshift-image-registry.apps.prod-cluster-url.com/cicd/petclinic:prod \
+    --insecure=true
+```
+
+This command has to run within nested `withDockerRegistry` blocks so that Jenkins can associated stored credentials with the different image registry URLs.
+
