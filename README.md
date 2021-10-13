@@ -80,91 +80,105 @@ Now, configure Jenkins so it can connect to the "prod" cluster.
     * Default Project: `cicd`
     * Click **Save**
 
-Next, use the same token to create a standare "username and password" credential for the `oc image mirror` command to use in order to connect to the "production" docker image registry.
+Next, use the same token to create a "secret text" credential for the Skopeo command to use in order to connect to the "production" docker image registry.
 
 1. Navigate to **Jenkins -> Credentials -> (global) -> Add Credentials**
-    * Kind: `Username with password`
-    * Username: `jenkins`
-    * Password: `service account token from "oc sa get-token jenkins" command`
+    * Kind: `Secret text`
+    * Secret: `jenkins:<TOKEN>`
     * ID: `image-creds-prod`
     * Click **Save**
 
 You will also need credentials from the "non-prod" cluster in order to copy images.  You will need to create a service account in the non-prod cluster and give it access to the project where your images exist.
 
-If Jenkins already exists in the non-prod cluster, then it would be a good idea to re-use that service account (it should already exist).  If Jenkins and your images both exist in the "cicd" namespace, then simply execute the following commands when logged into the non-prod cluster:
+If Jenkins already exists in the non-prod cluster, then it would be a good idea to re-use that service account (it should already exist).  If Jenkins and your images both exist in the "cicd-tools" namespace, then simply execute the following commands when logged into the non-prod cluster:
 
 ```
-oc adm policy add-role-to-user system:image-puller system:serviceaccount:cicd:jenkins -n cicd
+oc adm policy add-role-to-user system:image-puller system:serviceaccount:cicd-tools:jenkins -n cicd-tools
 ```
 
 Then get the service account token:
 
 ```
-oc sa get-token jenkins -n cicd
+oc sa get-token jenkins -n cicd-tools
 ```
 
 Create  new credential like you did for the production Jenkins service account:
 
 1. Navigate to **Jenkins -> Credentials -> (global) -> Add Credentials**
-    * Kind: `Username with password`
-    * Username: `jenkins`
-    * Password: `service account token from "oc sa get-token jenkins" command`
+    * Kind: `Secret text`
+    * Secret: `jenkins:<TOKEN>`
     * ID: `image-creds-non-prod`
     * Click **Save**
 
 
 With this in place, the following pipeline should:
 
-1. List the images in the non-prod cluster "cicd" project.
-2. Copy the "petclinic:dev" image/tag from the non-prod "cicd" project to the production "cicd" project.
+1. List the images in the non-prod cluster "cicd-tools" project.
+2. Copy the "petclinic:dev" image/tag from the non-prod "cicd-tools" project to the production "cicd" project.
 3. List the image in the production cluster "cicd" project.
 
 This pipeline will run from the non-production cluster.
 
 ```
 pipeline {
-  agent {
-    label 'maven'
-  }
+  agent none
   stages {
-    stage('Initialize') {
-      steps {
-        echo "Pipeline has started."
-      }
-    }
     stage("List DEV images") {
+      agent {
+        label 'maven'
+      }
       steps {
         script {
-          echo "Listing images in non-prod cluster..."
+          echo "Listing images..."
           openshift.withCluster() {
-            openshift.withProject('cicd') {
+            openshift.withProject('cicd-tools') {
               def istream = openshift.selector('is')
               //istream.describe()
               istream.withEach { // The closure body will be executed once for each selected object.
                     // The 'it' variable will be bound to a Selector which selects a single
                     // object which is the focus of the iteration.
-                echo "Image Stream: ${it.name()} is defined in ${openshift.project()}"
+                  echo "Image Stream: ${it.name()} is defined in ${openshift.project()}"
+              }
+              println "${istream}"
+            }
+          }
+        }
+      }
+    }
+    stage("Skopeo") {
+      agent {
+        label 'skopeo'
+      }
+      steps {
+        script {
+          echo "Skopeo copy step."
+          openshift.withCluster() {
+            openshift.withProject('cicd-tools') {
+              withCredentials([string(credentialsId: 'image-creds-non-prod', variable: 'NON_PROD_CREDS'),
+                               string(credentialsId: 'image-creds-prod', variable: 'PROD_CREDS')]) {
+            	sh """
+            	    set -x
+                	skopeo --debug copy \
+                	  --src-tls-verify=false \
+                	  --dest-tls-verify=false \
+                	  --src-creds="${NON_PROD_CREDS}" \
+                	  --dest-creds="${PROD_CREDS}" \
+                	  docker://docker-registry.default.svc.cluster.local:5000/cicd-tools/petclinic:dev \
+                	  docker://<prod cluster registry route>/cicd/petclinic:prod
+              	"""
               }
             }
           }
         }
       }
     }
-    stage('Copy Image') {
-    	steps {
-    	  withDockerRegistry([credentialsId: "image-creds-non-prod", url: "http://docker-registry.default.svc.cluster.local:5000"]) {
-        	withDockerRegistry([credentialsId: "image-creds-prod", url: "https://default-route-openshift-image-registry.apps.prod-cluster-url.com"]) {
-            sh """
-                oc image mirror docker-registry.default.svc.cluster.local:5000/cicd/petclinic:dev default-route-openshift-image-registry.apps.prod-cluster-url.com/cicd/petclinic:prod --insecure=true
-            """
-          }
-    	  }
-      }
-    }
     stage("List PROD images") {
+      agent {
+        label 'maven'
+      }
       steps {
         script {
-          echo "Listing images in production cluster..."
+          echo "Listing images..."
           openshift.withCluster('production') {
             openshift.withProject('cicd') {
               def istream = openshift.selector('is')
@@ -172,8 +186,9 @@ pipeline {
               istream.withEach { // The closure body will be executed once for each selected object.
                     // The 'it' variable will be bound to a Selector which selects a single
                     // object which is the focus of the iteration.
-                echo "Image Stream: ${it.name()} is defined in ${openshift.project()}"
+                  echo "Image Stream: ${it.name()} is defined in ${openshift.project()}"
               }
+              println "${istream}"
             }
           }
         }
@@ -183,22 +198,10 @@ pipeline {
 }
 ```
 
-When it comes to mirroring the images, there are a few parts to understand:
+When it comes to copying the images, there are a few parts to understand:
 
 * **Local cluster image registry internal URL:** `docker-registry.default.svc.cluster.local:5000`
-* **Local image project/imagename:tag:** `/cicd/petclinic:dev`
-* **Production cluster image registry exposed route url:** `default-route-openshift-image-registry.apps.prod-cluster-url.com`
+* **Local image project/imagename:tag:** `/cicd-tools/petclinic:dev`
+* **Production cluster image registry exposed route url:** `<prod cluster registry route>`
 * **Production image project/imagename:tag:** `/cicd/petclinic:prod`
-* **Use insecure (http) protocol for local registry:** `--insecure=true`
-
-Put together, the command looks like this (split across multiple lines for clarity):
-
-```
-oc image mirror \
-    docker-registry.default.svc.cluster.local:5000/cicd/petclinic:dev \
-    default-route-openshift-image-registry.apps.prod-cluster-url.com/cicd/petclinic:prod \
-    --insecure=true
-```
-
-This command has to run within nested `withDockerRegistry` blocks so that Jenkins can associated stored credentials with the different image registry URLs.
 
