@@ -133,7 +133,6 @@ pipeline {
           openshift.withCluster() {
             openshift.withProject('cicd-tools') {
               def istream = openshift.selector('is')
-              //istream.describe()
               istream.withEach { // The closure body will be executed once for each selected object.
                     // The 'it' variable will be bound to a Selector which selects a single
                     // object which is the focus of the iteration.
@@ -182,7 +181,6 @@ pipeline {
           openshift.withCluster('production') {
             openshift.withProject('cicd') {
               def istream = openshift.selector('is')
-              istream.describe()
               istream.withEach { // The closure body will be executed once for each selected object.
                     // The 'it' variable will be bound to a Selector which selects a single
                     // object which is the focus of the iteration.
