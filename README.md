@@ -2,6 +2,29 @@
 
 This is a simplified pipeline adapted from [Gerald Nunn's example](https://github.com/gnunn1/openshift-basic-pipeline/tree/master/openshift/cross-cluster).
 
+## Getting Started: Building a Skopeo Jenkins Agent
+
+Out of the box, OpenShift does not have a "Skopeo" Jenkins agent available.  However, it's easy enough to make one from the ["Jenkins Agent Base" image](https://catalog.redhat.com/software/containers/openshift3/jenkins-slave-base-rhel7/581d2f3f00e5d05639b6515b).
+
+In order to create a new "skopeo" Jenkins agent, we only need an "ImageStream" and a "BuildConfig" that can build the image from a Dockerfile.
+
+First, clone this repository, then:
+
+1. Create the Skopeo Jenkins agent `ImageStream` and `BuildConfig` in the same project where Jenkins is installed.  For example, if Jenkins is installed in `cicd-tools`, then run the following command:
+
+```
+oc apply -f resources/jenkins-skopeo-agent-imagestream.yaml -n cicd-tools
+oc apply -f resources/jenkins-skopeo-agent-buildconfig.yaml -n cicd-tools
+```
+
+You can then start the build:
+
+```
+oc start-build skopeo -n cicd-tools
+```
+
+Once the build completes, you will have a new Jenkins agent named "skopeo".  The `ImageStream` you created includes a label of `role=jenkins-slave`.  This allows Jenkins to auto-discover this new agent type.  To use this agent, you simply need to specify the the agent label of `skopeo` in your Jenkinsfile.
+
 ## Setting Up "Production" Cluster
 
 The "production" cluster will not have Jenkins installed on it, but Jenkins running in "non-prod" will need access to this cluster.  For this, we will need a service account.
