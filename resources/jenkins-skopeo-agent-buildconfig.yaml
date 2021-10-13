@@ -1,0 +1,23 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: skopeo-jenkins-agent
+  name: skopeo
+spec:
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: 'skopeo:latest'
+  source:
+    contextDir: /
+    git:
+      uri: 'https://github.com/pittar/jenkins-slave-skopeo'
+    type: Git
+  strategy:
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+    type: Docker
+  successfulBuildsHistoryLimit: 5
+  triggers: []

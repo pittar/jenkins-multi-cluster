@@ -1,0 +1,9 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    role: jenkins-slave
+  name: skopeo
+spec:
+  lookupPolicy:
+    local: false
